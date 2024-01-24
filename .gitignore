@@ -1,3 +1,4 @@
 runs/*
 vgg19/
 images/output/
+__pycache__/

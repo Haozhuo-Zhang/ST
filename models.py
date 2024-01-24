@@ -92,3 +92,25 @@ def init_model(device):
     model.to(device).eval()
 
     return model, content_index, style_indices
+
+
+class LapPyramid(torch.nn.Module):
+    def __init__(self, device, n_levels=5):
+        super(LapPyramid, self).__init__()
+        self.n_levels = n_levels
+        laplacian_kernel = (
+            torch.tensor([[0, -1, 0], [-1, 4, -1], [0, -1, 0]], dtype=torch.float32)
+            .unsqueeze(0)
+            .unsqueeze(0)
+        )
+        self.laplacian_kernel = laplacian_kernel.repeat(1, 3, 1, 1).to(device)
+        self.downsample = torch.nn.AvgPool2d(2, stride=2)
+
+    def forward(self, x):
+        # x: [b, c, h, w]
+        laplacians = []
+        for i in range(self.n_levels):
+            laplacian = torch.nn.functional.conv2d(x, self.laplacian_kernel, padding=1)
+            laplacians.append(laplacian)
+            x = self.downsample(x)
+        return laplacians

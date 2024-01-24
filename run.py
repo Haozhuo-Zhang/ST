@@ -11,7 +11,7 @@ import torchvision.models as models
 
 import os
 import util
-import vggmodel
+import models
 import argparse
 
 
@@ -98,6 +98,13 @@ def loadargs():
         default=[-1, -1],
         help='shape of output image, default "-1 -1" for shape of content image / 2, or "width -1" to set width and let height scale from content image, or "width height" for custom setting',
     )
+    parser.add_argument("--lapstyle", action="store_true", help="use lapstyle")
+    parser.add_argument(
+        "--lap_weight",
+        type=float,
+        default=1e3,
+        help="weight of laplacian loss, default 1e2",
+    )
     args = parser.parse_args()
     config = dict()
     for arg in vars(args):
@@ -118,16 +125,19 @@ if __name__ == "__main__":
     print("Preparing imagings and model...")
     print(f"content image: {config['content']}\nstyle image: {config['style']}")
     content_img, style_img, out_img = loadimgs(config, device)
+
     print("CNN model used: vgg19")
-    model, content_index, style_indices = vggmodel.init_model(device)
+    model, content_index, style_indices = models.init_model(device)
+
     print("Extracting features from images...")
     content_feature = model(content_img)
     style_feature = model(style_img)
+
     target_content_representation = util.get_content_rep(content_feature, content_index)
     target_style_representation = util.get_style_rep(style_feature, style_indices)
 
     savedir = util.prepare_savedir(config)
-    optimizer = optim.Adam((out_img,), lr=5)
+    optimizer = optim.Adam((out_img,), lr=10)
     iterations = 3000
 
     content_weight, style_weight, tv_weight = (
@@ -136,30 +146,73 @@ if __name__ == "__main__":
         config["tv_weight"],
     )
 
-    print("Iteration starts")
-    for it in range(iterations):
-        total_loss, content_loss, style_loss, tv_loss = util.get_gatys_loss(
-            model,
-            out_img,
-            target_content_representation,
-            content_index,
-            target_style_representation,
-            style_indices,
-            content_weight,
-            style_weight,
-            tv_weight,
-        )
-        total_loss.backward()
+    print("Iteration starts...")
+    if config["lapstyle"]:
+        print("Using Lapstyle")
+        lapmodel = models.LapPyramid(device)
+        target_content_lap_representation = lapmodel(content_img)
+        lap_weight = config["lap_weight"]
 
-        optimizer.step()
-        optimizer.zero_grad()
+        for it in range(iterations):
+            (
+                total_loss,
+                content_loss,
+                style_loss,
+                tv_loss,
+                lap_loss,
+            ) = util.get_lapstyle_loss(
+                model,
+                out_img,
+                target_content_representation,
+                content_index,
+                target_style_representation,
+                style_indices,
+                content_weight,
+                style_weight,
+                tv_weight,
+                lapmodel,
+                target_content_lap_representation,
+                lap_weight,
+            )
+            total_loss.backward()
 
-        if it % 50 == 0 or it == iterations - 1:
-            with torch.no_grad():
-                print(
-                    f"iteration: {it:04}, total loss={total_loss.item()}, content_loss={content_weight * content_loss.item()}, style loss={style_weight * style_loss.item()}, tv loss={tv_weight * tv_loss.item()}"
-                )
-                if it % 200 == 0 or it == iterations - 1:
-                    torchvision.utils.save_image(
-                        util.postprocess(out_img), f"{savedir}/iter{it:04}.jpg"
+            optimizer.step()
+            optimizer.zero_grad()
+
+            if it % 50 == 0 or it == iterations - 1:
+                with torch.no_grad():
+                    print(
+                        f"iteration: {it:04}, total loss={total_loss.item()}, content_loss={content_weight * content_loss.item()}, style loss={style_weight * style_loss.item()}, tv loss={tv_weight * tv_loss.item()}, lap loss={lap_weight * lap_loss.item()}"
                     )
+                    if it % 200 == 0 or it == iterations - 1:
+                        torchvision.utils.save_image(
+                            util.postprocess(out_img), f"{savedir}/iter{it:04}.jpg"
+                        )
+    else:
+        print("Using Gatys")
+        for it in range(iterations):
+            total_loss, content_loss, style_loss, tv_loss = util.get_gatys_loss(
+                model,
+                out_img,
+                target_content_representation,
+                content_index,
+                target_style_representation,
+                style_indices,
+                content_weight,
+                style_weight,
+                tv_weight,
+            )
+            total_loss.backward()
+
+            optimizer.step()
+            optimizer.zero_grad()
+
+            if it % 50 == 0 or it == iterations - 1:
+                with torch.no_grad():
+                    print(
+                        f"iteration: {it:04}, total loss={total_loss.item()}, content_loss={content_weight * content_loss.item()}, style loss={style_weight * style_loss.item()}, tv loss={tv_weight * tv_loss.item()}"
+                    )
+                    if it % 200 == 0 or it == iterations - 1:
+                        torchvision.utils.save_image(
+                            util.postprocess(out_img), f"{savedir}/iter{it:04}.jpg"
+                        )

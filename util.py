@@ -24,6 +24,16 @@ def postprocess(img):
     return img.permute(2, 0, 1) / 255
 
 
+def prepare_savedir(config):
+    savedir = f"{config['output_img_dir']}{config['content'].split('.')[0]}_{config['style'].split('.')[0]}"
+    if config["lapstyle"]:
+        savedir += "/lapstyle"
+    else:
+        savedir += "/gatys"
+    os.makedirs(savedir, exist_ok=True)
+    return savedir
+
+
 def gram_matrix(x, should_normalize=True):
     # batch
     (b, c, h, w) = x.size()
@@ -82,7 +92,45 @@ def get_gatys_loss(
     return total_loss, content_loss, style_loss, tv_loss
 
 
-def prepare_savedir(config):
-    savedir = f"{config['output_img_dir']}{config['content'].split('.')[0]}_{config['style'].split('.')[0]}"
-    os.makedirs(savedir, exist_ok=True)
-    return savedir
+def get_laplacian_loss(lapmodel, generating_img_tensor, target_content_lap_rep):
+    lapstyle_weights = [16, 8, 4, 2, 1]
+    gen_laplacians = lapmodel(generating_img_tensor)
+
+    lap_loss = 0.0
+    for i in range(len(lapstyle_weights)):
+        lap_loss += lapstyle_weights[i] * torch.nn.MSELoss(reduction="mean")(
+            gen_laplacians[i], target_content_lap_rep[i]
+        )
+    return lap_loss
+
+
+def get_lapstyle_loss(
+    vggmodel,
+    generating_img_tensor,
+    target_content_rep,
+    content_index,
+    target_style_rep,
+    style_indices,
+    content_weight,
+    style_weight,
+    tv_weight,
+    lapmodel,
+    target_content_lap_rep,
+    lap_weight,
+):
+    total_loss, content_loss, style_loss, tv_loss = get_gatys_loss(
+        vggmodel,
+        generating_img_tensor,
+        target_content_rep,
+        content_index,
+        target_style_rep,
+        style_indices,
+        content_weight,
+        style_weight,
+        tv_weight,
+    )
+    lap_loss = get_laplacian_loss(
+        lapmodel, generating_img_tensor, target_content_lap_rep
+    )
+    total_loss += lap_loss * lap_weight
+    return total_loss, content_loss, style_loss, tv_loss, lap_loss
