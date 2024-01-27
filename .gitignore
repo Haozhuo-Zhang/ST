@@ -1,4 +1,5 @@
 runs/*
 vgg19/
+resnet50/
 images/output/
 __pycache__/

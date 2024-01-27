@@ -11,9 +11,9 @@ class Vgg19(torch.nn.Module):
 
     def __init__(self, requires_grad=False, use_relu=True):
         super().__init__()
-        if os.path.exists("../vgg19/vgg19-dcbb9e9d.pth"):
+        if os.path.exists("./vgg19/vgg19.pth"):
             vgg19_model = models.vgg19(weights=None)
-            vgg19_model.load_state_dict(torch.load("../vgg19/vgg19-dcbb9e9d.pth"))
+            vgg19_model.load_state_dict(torch.load("./vgg19/vgg19.pth"))
             pretrained_vgg19 = vgg19_model.features
         else:
             pretrained_vgg19 = models.vgg19(
@@ -43,7 +43,7 @@ class Vgg19(torch.nn.Module):
         self.content_index = 4  # conv4_2
 
         # all layers except conv4_2
-        self.style_index = [0, 1, 2, 3, 5]
+        self.style_indices = [0, 1, 2, 3, 5]
 
         self.slice1 = torch.nn.Sequential()
         self.slice2 = torch.nn.Sequential()
@@ -85,10 +85,10 @@ class Vgg19(torch.nn.Module):
         return out
 
 
-def init_model(device):
+def init_vgg_model(device):
     model = Vgg19(requires_grad=False, use_relu=True)
     content_index = model.content_index  # 4
-    style_indices = model.style_index  # 0, 1, 2, 3, 5
+    style_indices = model.style_indices  # 0, 1, 2, 3, 5
     model.to(device).eval()
 
     return model, content_index, style_indices
@@ -114,3 +114,66 @@ class LapPyramid(torch.nn.Module):
             laplacians.append(laplacian)
             x = self.downsample(x)
         return laplacians
+
+
+class Resnet50(torch.nn.Module):
+    def __init__(self, alpha=0.001, requires_grad=False):
+        super().__init__()
+        if os.path.exists("./resnet50/resnet50.pth"):
+            self.resnet50 = models.resnet50(weights=None)
+            self.resnet50.load_state_dict(torch.load("./resnet50/resnet50.pth"))
+        else:
+            self.resnet50 = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
+        if not requires_grad:
+            for param in self.resnet50.parameters():
+                param.requires_grad_(False)
+        # self.layer1 = ["conv1_0", "conv1_1", "conv1_2"]
+        # self.layer2 = ["conv2_0", "conv2_1", "conv2_2", "conv2_3"]
+        # self.layer3 = [
+        #     "conv3_0",
+        #     "conv3_1",
+        #     "conv3_2",
+        #     "conv3_3",
+        #     "conv3_4",
+        #     "conv3_5",
+        # ]
+        # self.layer4 = ["conv4_0", "conv4_1", "conv4_2"]
+        # self.style_indices = ["conv0_0", "conv1_2", "conv2_3", "conv3_5", "conv4_2"]
+        # self.content_index = "conv3_5"
+        self.alpha = alpha
+        self.style_indices = [0, 1, 2, 3, 4]
+        self.content_index = 3
+
+    def forward(self, x):
+        features = []
+        x = self.resnet50.conv1(x)
+        x = self.resnet50.bn1(x)
+        x = self.resnet50.relu(x)
+        features.append(x)  # 0
+        x = self.resnet50.maxpool(x)
+
+        for layer in self.resnet50.layer1:
+            x = layer(x)
+        features.append(x)  # 1
+
+        for layer in self.resnet50.layer2:
+            x = layer(x)
+        features.append(x)  # 2
+
+        for layer in self.resnet50.layer3:
+            x = layer(x)
+        features.append(x * self.alpha)  # 3
+
+        for layer in self.resnet50.layer4:
+            x = layer(x)
+        features.append(x * self.alpha)  # 4
+        return features
+
+
+def init_resnet_model(device):
+    model = Resnet50()
+    content_index = model.content_index
+    style_indices = model.style_indices
+    model.to(device).eval()
+
+    return model, content_index, style_indices

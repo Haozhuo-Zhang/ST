@@ -1,49 +1,11 @@
 import torch
 import torch.optim as optim
 
-from PIL import Image
-import matplotlib.pyplot as plt
-import numpy as np
-
 import torchvision
-import torchvision.transforms as transforms
-import torchvision.models as models
 
-import os
 import util
 import models
 import argparse
-
-
-def loadimgs(config, device):
-    content_img = Image.open(config["content_img_dir"] + config["content"])
-    style_img = Image.open(config["style_img_dir"] + config["style"])
-    if config["shape"] == [-1, -1]:
-        image_shape = (content_img.size[1] // 2, content_img.size[0] // 2)
-    elif config["shape"][1] == -1:
-        image_shape = (
-            config["shape"][0],
-            config["shape"][0] * content_img.size[0] // content_img.size[1],
-        )
-    else:
-        image_shape = config["shape"]
-
-    content_img = util.preprocess(content_img, image_shape, device)
-
-    style_img = util.preprocess(style_img, image_shape, device)
-
-    if config["init"] == "random":
-        out_img = np.random.normal(loc=0, scale=255 / 2, size=content_img.shape).astype(
-            np.float32
-        )
-        out_img = torch.from_numpy(out_img).to(device)
-    elif config["init"] == "content":
-        out_img = content_img.clone()
-    elif config["init"] == "style":
-        out_img = style_img.clone()
-    out_img.requires_grad = True
-
-    return content_img, style_img, out_img
 
 
 def loadargs():
@@ -124,10 +86,10 @@ if __name__ == "__main__":
 
     print("Preparing imagings and model...")
     print(f"content image: {config['content']}\nstyle image: {config['style']}")
-    content_img, style_img, out_img = loadimgs(config, device)
+    content_img, style_img, out_img = util.loadimgs(config, device)
 
     print("CNN model used: vgg19")
-    model, content_index, style_indices = models.init_model(device)
+    model, content_index, style_indices = models.init_vgg_model(device)
 
     print("Extracting features from images...")
     content_feature = model(content_img)
@@ -136,7 +98,7 @@ if __name__ == "__main__":
     target_content_representation = util.get_content_rep(content_feature, content_index)
     target_style_representation = util.get_style_rep(style_feature, style_indices)
 
-    savedir = util.prepare_savedir(config)
+    savedir = util.prepare_savedir(config, "vgg")
     optimizer = optim.Adam((out_img,), lr=10)
     iterations = 3000
 

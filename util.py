@@ -1,31 +1,79 @@
 import torch
 from torchvision import transforms
+from PIL import Image
+import numpy as np
 import os
 
-rgb_mean = torch.tensor([123.675, 116.28, 103.53])
-rgb_std = torch.tensor([1, 1, 1])
+rgb_mean = torch.tensor([0.485, 0.456, 0.406])
+rgb_std = torch.tensor([0.229, 0.224, 0.225])
+rgb_mean_scale = torch.tensor([123.675, 116.28, 103.53])
+rgb_std_scale = torch.tensor([1, 1, 1])
 
 
-def preprocess(img, image_shape, device) -> torch.Tensor:
-    transform = transforms.Compose(
-        [
-            transforms.Resize(image_shape),
-            transforms.ToTensor(),
-            transforms.Lambda(lambda x: x.mul(255)),
-            transforms.Normalize(mean=rgb_mean, std=rgb_std),
-        ]
-    )
+def preprocess(img, image_shape, device, scale=True) -> torch.Tensor:
+    if scale:
+        transform = transforms.Compose(
+            [
+                transforms.Resize(image_shape),
+                transforms.ToTensor(),
+                transforms.Lambda(lambda x: x.mul(255)),
+                transforms.Normalize(mean=rgb_mean_scale, std=rgb_std_scale),
+            ]
+        )
+    else:
+        transform = transforms.Compose(
+            [
+                transforms.Resize(image_shape),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=rgb_mean, std=rgb_std),
+            ]
+        )
     return transform(img).to(device).unsqueeze(0)  # (1, C, H, W)
 
 
-def postprocess(img):
+def postprocess(img, scale=True):
     img = img[0].to("cpu").detach()  # cpu
-    img = torch.clamp(img.permute(1, 2, 0) * rgb_std + rgb_mean, 0, 255)
-    return img.permute(2, 0, 1) / 255
+    if scale:
+        img = torch.clamp(img.permute(1, 2, 0) * rgb_std_scale + rgb_mean_scale, 0, 255)
+        return img.permute(2, 0, 1) / 255
+    else:
+        img = torch.clamp(img.permute(1, 2, 0) * rgb_std + rgb_mean, 0, 1)
+        return img.permute(2, 0, 1)
 
 
-def prepare_savedir(config):
-    savedir = f"{config['output_img_dir']}{config['content'].split('.')[0]}_{config['style'].split('.')[0]}"
+def loadimgs(config, device, scale=True):
+    content_img = Image.open(config["content_img_dir"] + config["content"])
+    style_img = Image.open(config["style_img_dir"] + config["style"])
+    if config["shape"] == [-1, -1]:
+        image_shape = (content_img.size[1] // 2, content_img.size[0] // 2)
+    elif config["shape"][1] == -1:
+        image_shape = (
+            config["shape"][0],
+            config["shape"][0] * content_img.size[0] // content_img.size[1],
+        )
+    else:
+        image_shape = config["shape"]
+
+    content_img = preprocess(content_img, image_shape, device, scale)
+
+    style_img = preprocess(style_img, image_shape, device, scale)
+
+    if config["init"] == "random":
+        out_img = np.random.normal(loc=0, scale=255 / 2, size=content_img.shape).astype(
+            np.float32
+        )
+        out_img = torch.from_numpy(out_img).to(device)
+    elif config["init"] == "content":
+        out_img = content_img.clone()
+    elif config["init"] == "style":
+        out_img = style_img.clone()
+    out_img.requires_grad = True
+
+    return content_img, style_img, out_img
+
+
+def prepare_savedir(config, path=""):
+    savedir = f"{config['output_img_dir']}{path}_{config['content'].split('.')[0]}2{config['style'].split('.')[0]}"
     if config["lapstyle"]:
         savedir += "/lapstyle"
     else:
